@@ -97,57 +97,54 @@ def compute_local_texture_features(image, window_size=32, stride=16):
     
     return features_map
 
-def detect_texture_anomalies(image, window_size=32, threshold_std=2.0):
+def detect_texture_anomalies(image, window_size=32, threshold_std=1.5):
     """
-    Phat hien cac vung co texture bat thuong so voi phan con lai.
-    Chi phat hien texture THUC SU bat thuong (det khong deu).
-    Cac vet xuoc se duoc phat hien tu edge detection.
+    Phát hiện các vùng có texture bất thường so với phần còn lại.
     
     Args:
-        image: anh grayscale dau vao
-        window_size: kich thuoc cua so phan tich texture
-        threshold_std: nguong do lech chuan de coi la anomaly (tang len = it nhay hon)
+        image: ảnh grayscale đầu vào
+        window_size: kích thước cửa sổ phân tích texture
+        threshold_std: ngưỡng độ lệch chuẩn để coi là anomaly
     
     Returns:
-        anomaly_mask: anh nhi phan voi 255 la vung bat thuong
-        texture_map: map cua texture values
+        anomaly_mask: ảnh nhị phân với 255 là vùng bất thường
+        texture_map: map của texture values
     """
     height, width = image.shape
     texture_map = np.zeros((height, width), dtype=np.float32)
     
-    # Tinh toan texture entropy cho tung vung
+    # Tính toán texture entropy cho từng vùng
     stride = window_size // 2
     for y in range(0, height - window_size, stride):
         for x in range(0, width - window_size, stride):
             patch = image[y:y+window_size, x:x+window_size]
             
-            # Tinh do khong deu (entropy)
+            # Tính độ không đều (entropy)
             hist, _ = np.histogram(patch, bins=256, range=(0, 256))
             hist = hist / (hist.sum() + 1e-10)
             entropy = -np.sum(hist * np.log2(hist + 1e-10))
             
-            # Tinh do lech chuan (variation)
+            # Tính độ lệch chuẩn (variation)
             variation = np.std(patch)
             
-            # Chi lay entropy cao va variation cao - khong phai vet xuoc
+            # Combine entropy và variation
             texture_score = entropy * variation
             texture_map[y:y+window_size, x:x+window_size] = texture_score
     
     # Smooth texture map
     texture_map = cv2.GaussianBlur(texture_map, (5, 5), 0)
     
-    # Tinh gia tri trung binh va do lech chuan cua texture
+    # Tính giá trị trung bình và độ lệch chuẩn của texture
     mean_texture = np.mean(texture_map)
     std_texture = np.std(texture_map)
     
-    # Nguong: texture bat thuong co gia tri > mean + threshold_std * std
-    # Tang threshold_std len de it phat hien hang loat "texture anomaly" nho
+    # Ngưỡng: texture bất thường có giá trị > mean + threshold_std * std
     threshold = mean_texture + threshold_std * std_texture
     anomaly_mask = np.zeros((height, width), dtype=np.uint8)
     anomaly_mask[texture_map > threshold] = 255
     
-    # Morphological operations de lam sach
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    # Morphological operations để làm sạch
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     anomaly_mask = cv2.morphologyEx(anomaly_mask, cv2.MORPH_OPEN, kernel)
     anomaly_mask = cv2.morphologyEx(anomaly_mask, cv2.MORPH_CLOSE, kernel)
     

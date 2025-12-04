@@ -1,69 +1,68 @@
+# import os
+# from config import EXAMPLE_DIR, OUTPUT_DIR
+# from io_utils import load_image, save_image
+# from preprocess import preprocess_image
+# from edge_detection import detect_edges
+# from segmentation import segment_defects
+# from area_measurement import measure_defect_area
+
+# def process_all_examples():
+
+#     for filename in os.listdir(EXAMPLE_DIR):
+#         if filename.endswith((".jpg", ".png")):
+
+#             print(f"\n=== Processing {filename} ===")
+#             path = os.path.join(EXAMPLE_DIR, filename)
+
+#             # 1) Load ảnh
+#             img = load_image(path)
+
+#             # 2) Preprocess
+#             processed_img, _ = preprocess_image(img, filename)
+
+#             # 3) Edge detection
+#             edges = detect_edges(processed_img)
+
+#             # 4) Segment (contour)
+#             contours = segment_defects(edges)
+
+#             # 5) Area measurement + vẽ bounding box
+#             result_img, result_info = measure_defect_area(contours, img.copy())
+
+#             # 6) Lưu kết quả
+#             output_path = os.path.join(OUTPUT_DIR, filename)
+#             save_image(output_path, result_img)
+
+#             print(f"Detected {len(result_info)} defects!")
+
+
+# if __name__ == "__main__":
+#     process_all_examples()
+
+
 import os
-import cv2
-from config import EXAMPLE_DIR, OUTPUT_DIR, PROCESSED_DIR
+import csv
+from datetime import datetime
+from config import EXAMPLE_DIR, OUTPUT_DIR
 from io_utils import load_image, save_image
 from preprocess import preprocess_image
 from edge_detection import detect_edges
 from defect_detection import detect_defects_combined, visualize_defects_analysis
 
-def visualize_edge_defects(image, defect_info):
-    """
-    Chi ve cac loi phhat hien tu edge detection
-    """
-    if len(image.shape) == 2:
-        vis_img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    else:
-        vis_img = image.copy()
-    
-    h_img, w_img = vis_img.shape[:2]
-    
-    color_map = {
-        'hole': (0, 0, 255),           # Do
-        'tear': (0, 165, 255),         # Cam
-        'uneven_weaving': (0, 255, 0), # Xanh lac
-        'combined': (255, 0, 255)      # Tim
-    }
-    
-    for defect in defect_info:
-        # Chi ve cac loi tu edge (hole, tear)
-        if defect['type'] not in ['hole', 'tear']:
-            continue
-            
-        x, y, w, h = defect['bbox']
-        defect_type = defect['type']
-        area = defect['area']
-        color = color_map.get(defect_type, (255, 255, 255))
-        
-        cv2.rectangle(vis_img, (x, y), (x + w, y + h), color, 3)
-        
-        text_main = f"{defect_type.upper()}"
-        text_area = f"Area: {area:.1f} px2"
-        
-        y_top = max(5, y - 35)
-        x_left = max(5, x)
-        cv2.rectangle(vis_img, (x_left - 2, y_top), (min(x_left + 180, w_img - 5), y_top + 30), (0, 0, 0), -1)
-        cv2.putText(vis_img, text_main, (x_left + 5, y_top + 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        
-        y_bottom = min(h_img - 35, y + h + 5)
-        cv2.rectangle(vis_img, (x_left - 2, y_bottom), (min(x_left + 180, w_img - 5), y_bottom + 30), (0, 0, 0), -1)
-        cv2.putText(vis_img, text_area, (x_left + 5, y_bottom + 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-    
-    return vis_img
-
 def process_all_examples():
     """
-    Xu ly tat ca anh su dung phuong phap ket hop phat hien loi:
-    - Phat hien tu bien (edge): lo thung, vet dut
-    - Phat hien tu texture: det khong deu
-    - Luu anh da xu ly vao data/processed (chi edge defects)
-    - Luu anh output (anh goc voi ca edge + texture defects) vao data/output
+    Xử lý tất cả ảnh sử dụng phương pháp kết hợp phát hiện lỗi:
+    - Phát hiện từ biên (edge): lỗ thủng, vết đứt
+    - Phát hiện từ texture: dệt không đều
     """
     
-    # Dam bao thu muc ton tai
+    # Đảm bảo thư mục output tồn tại
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(PROCESSED_DIR, exist_ok=True)
+    
+    # Tạo file CSV để lưu báo cáo
+    report_path = os.path.join(OUTPUT_DIR, f'report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
+    
+    all_defects = []
     
     for filename in os.listdir(EXAMPLE_DIR):
         if filename.lower().endswith((".jpg", ".png")):
@@ -74,72 +73,94 @@ def process_all_examples():
             
             path = os.path.join(EXAMPLE_DIR, filename)
             
-            # 1) Load anh goc
+            # 1) Load ảnh
             img = load_image(path)
             if img is None:
-                print(f"[ERROR] Khong doc duoc anh {filename}, bo qua.")
+                print(f"❌ Không đọc được ảnh {filename}, bỏ qua.")
                 continue
             
-            # Chuyen sang grayscale de xu ly
+            # Chuyển sang grayscale để xử lý
             if len(img.shape) == 3:
+                import cv2
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             else:
                 gray = img.copy()
             
             # 2) Preprocess
-            print("[*] Tien xu ly anh...")
+            print("→ Tiền xử lý ảnh...")
             processed_img, _ = preprocess_image(gray)
             if processed_img is None:
-                print(f"[ERROR] Tien xu ly that bai {filename}, bo qua.")
+                print(f"❌ Tiền xử lý thất bại {filename}, bỏ qua.")
                 continue
             
             # 3) Edge detection
-            print("[*] Phat hien bien...")
+            print("→ Phát hiện biên...")
             edges = detect_edges(processed_img)
             if edges is None:
-                print(f"[ERROR] Edge detection that bai {filename}, bo qua.")
+                print(f"❌ Edge detection thất bại {filename}, bỏ qua.")
                 continue
             
-            # 4) Phat hien loi ket hop (edge + texture)
-            print("[*] Phat hien loi (ket hop bien + texture)...")
+            # 4) Phát hiện lỗi kết hợp (edge + texture)
+            print("→ Phát hiện lỗi (kết hợp biên + texture)...")
             combined_mask, edge_defects, texture_defects, defect_info = detect_defects_combined(
                 img, gray, edges
             )
             
-            # 5) Luu anh processed - chi co edge defects (hole, tear)
-            edge_only_defects = [d for d in defect_info if d['type'] in ['hole', 'tear']]
-            if len(edge_only_defects) > 0:
-                processed_vis = visualize_edge_defects(processed_img, edge_only_defects)
-            else:
-                processed_vis = cv2.cvtColor(processed_img, cv2.COLOR_GRAY2BGR) if len(processed_img.shape) == 2 else processed_img.copy()
-            
-            processed_path = os.path.join(PROCESSED_DIR, f"processed_{filename}")
-            save_image(processed_path, processed_vis)
-            print(f"[OK] Luu anh xu ly: {processed_path} ({len(edge_only_defects)} edge defects)")
-            
-            # 6) Luu anh output - ca edge + texture defects
             if len(defect_info) == 0:
-                print(f"[INFO] Khong phat hien loi trong anh {filename}")
-                if len(img.shape) == 3:
-                    result_img = img.copy()
-                else:
-                    result_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                print(f"ℹ️  Không phát hiện lỗi trong ảnh {filename}")
+                result_img = gray.copy()
             else:
-                print(f"[OK] Phat hien {len(defect_info)} loi (ket hop)")
+                print(f"✓ Phát hiện {len(defect_info)} lỗi")
                 
-                if len(img.shape) == 3:
-                    result_img = img.copy()
-                else:
-                    result_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                # Vẽ kết quả
+                result_img = visualize_defects_analysis(gray, combined_mask, edge_defects, texture_defects, defect_info)
                 
-                result_img = visualize_defects_analysis(result_img, combined_mask, edge_defects, texture_defects, defect_info)
-                
+                # In thông tin chi tiết
                 for i, defect in enumerate(defect_info, 1):
-                    print(f"  Loi {i}: {defect['type']} - Dien tich: {defect['area']:.1f} px2")
+                    print(f"  Lỗi {i}:")
+                    print(f"    - Loại: {defect['type']}")
+                    print(f"    - Diện tích: {defect['area']:.1f} px²")
+                    print(f"    - Mức độ nghiêm trọng: {defect['severity']:.1f}%")
+                    print(f"    - Texture entropy: {defect['texture_features']['entropy']:.3f}")
+                    
+                    # Lưu vào danh sách
+                    all_defects.append({
+                        'filename': filename,
+                        'defect_id': i,
+                        'type': defect['type'],
+                        'area': f"{defect['area']:.1f}",
+                        'width': defect['width'],
+                        'height': defect['height'],
+                        'severity': f"{defect['severity']:.1f}",
+                        'entropy': f"{defect['texture_features']['entropy']:.3f}",
+                        'contrast': f"{defect['texture_features']['contrast']:.3f}",
+                        'position_x': defect['x'],
+                        'position_y': defect['y']
+                    })
             
+            # 5) Lưu ảnh kết quả
             output_path = os.path.join(OUTPUT_DIR, f"detected_{filename}")
             save_image(output_path, result_img)
-            print(f"[OK] Luu anh output: {output_path}")
+            print(f"✓ Lưu kết quả: {output_path}")
+    
+    # 6) Lưu báo cáo CSV
+    if all_defects:
+        print(f"\n📊 Lưu báo cáo: {report_path}")
+        with open(report_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=all_defects[0].keys())
+            writer.writeheader()
+            writer.writerows(all_defects)
+        
+        # In tóm tắt
+        print(f"\n📈 TÓMLƯỢC:")
+        print(f"  - Tổng số ảnh: {len(set(d['filename'] for d in all_defects))}")
+        print(f"  - Tổng số lỗi: {len(all_defects)}")
+        print(f"  - Phân loại lỗi:")
+        for defect_type in set(d['type'] for d in all_defects):
+            count = sum(1 for d in all_defects if d['type'] == defect_type)
+            print(f"    • {defect_type}: {count}")
+    else:
+        print("\n✓ Xử lý hoàn tất - không phát hiện lỗi")
 
 if __name__ == "__main__":
     process_all_examples()
