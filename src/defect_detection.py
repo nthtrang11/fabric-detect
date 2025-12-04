@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from texture_analysis import detect_texture_anomalies, extract_texture_descriptors
 
-def detect_defects_combined(image, gray_image, edges_image):
+def detect_defects_combined(image, gray_image, edges_image, is_processed=True, physical_overlap_thresh=0.05):
     """
     Phát hiện lỗi kết hợp:
     1. Phát hiện lỗi từ biên (vết đứt, lỗ thủng)
@@ -41,7 +41,7 @@ def detect_defects_combined(image, gray_image, edges_image):
         x, y, w, h = cv2.boundingRect(cnt)
 
         # Xác định loại lỗi (truyền contour để tính đặc trưng hình học)
-        defect_type = classify_defect_type(gray_image, edge_defects, texture_defects, x, y, w, h, cnt)
+        defect_type = classify_defect_type(gray_image, edge_defects, texture_defects, x, y, w, h, cnt, is_processed=is_processed)
         
         # Trích xuất texture features
         region = (y, x, h, w)
@@ -50,6 +50,20 @@ def detect_defects_combined(image, gray_image, edges_image):
         # Tính severity score (0-100)
         severity = calculate_defect_severity(area, w, h, texture_features, defect_type)
         
+        # If defect classified as physical (hole/tear) we require that the
+        # region has sufficient overlap with the processed mask `image`.
+        if defect_type in ('hole', 'tear'):
+            # `image` is expected to be the processed binary mask (0/255)
+            try:
+                proc_mask = (image > 0).astype('uint8')
+                overlap = np.sum(proc_mask[y:y+h, x:x+w] > 0) / (w * h + 1e-10)
+            except Exception:
+                overlap = 0
+
+            if overlap < physical_overlap_thresh:
+                # Skip this physical detection because it doesn't appear in processed image
+                continue
+
         defect_info.append({
             'area': area,
             'bbox': (x, y, w, h),
@@ -85,7 +99,7 @@ def detect_edge_defects(edges, gray_image):
     
     return edge_mask, contours
 
-def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h, contour):
+def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h, contour, is_processed=True):
     """
     Phân loại loại lỗi dựa trên characteristics:
     - 'hole': Lỗ thủng (phát hiện từ edge)
@@ -120,6 +134,12 @@ def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h, contou
     # edge_dominant nếu edge đủ lớn hoặc chiếm tỉ lệ so với texture
     edge_dominant = (edge_ratio >= max(0.10, 0.25 * texture_ratio))
     if edge_dominant:
+        # Nếu ảnh chưa được xử lý (raw) và người dùng muốn chỉ phát hiện physical
+        # từ ảnh đã xử lý thì không classify thành 'hole'/'tear' ở đây.
+        if not is_processed:
+            # Tránh gán loại vật lý trên ảnh raw: gán 'combined' để biểu thị
+            # vùng bất thường nhưng không xác định là physical defect từ raw.
+            return 'combined'
         # Nếu vùng tròn, solidity cao và diện tích đủ lớn → hole
         if circularity > 0.60 and solidity > 0.55 and 0.6 <= aspect_ratio <= 1.6 and area_cnt > 180:
             return 'hole'
@@ -226,13 +246,41 @@ def visualize_defects_analysis(image, combined_mask, edge_defects, texture_defec
         defect_type = defect['type']
         severity = defect['severity']
         color = color_map.get(defect_type, (255, 255, 255))
-        
+
         # Vẽ bounding box
         cv2.rectangle(vis_img, (x, y), (x + w, y + h), color, 2)
-        
+
         # Vẽ text: tên lỗi + diện tích (px)
         text = f"{defect_type} | {defect['area']:.1f}px"
-        cv2.putText(vis_img, text, (x, y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        # Compute text size and baseline
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 2
+        (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+
+        # Preferred position: above the bbox (x, y - 10). If that would put
+        # the text outside the image, place it below the bbox instead.
+        img_h, img_w = vis_img.shape[:2]
+        text_x = x
+        text_y_above = y - 10
+        # top of text box would be text_y_above - text_h - baseline
+        if text_y_above - text_h - baseline < 0:
+            # place below bbox
+            text_y = y + h + text_h + 10
+            # ensure within image
+            if text_y + baseline > img_h:
+                text_y = img_h - baseline - 2
+        else:
+            text_y = text_y_above
+
+        # Background rectangle for better contrast
+        box_x1 = max(0, text_x)
+        box_y1 = max(0, text_y - text_h - baseline)
+        box_x2 = min(img_w, text_x + text_w)
+        box_y2 = min(img_h, text_y + baseline)
+
+        cv2.rectangle(vis_img, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), cv2.FILLED)
+        cv2.putText(vis_img, text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
     
     return vis_img

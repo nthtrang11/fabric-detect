@@ -87,7 +87,7 @@ def process_all_examples():
             
             # 2) Preprocess
             print("→ Tiền xử lý ảnh...")
-            processed_img, _ = preprocess_image(gray)
+            processed_img, contrast_img = preprocess_image(gray)
             if processed_img is None:
                 print(f"❌ Tiền xử lý thất bại {filename}, bỏ qua.")
                 continue
@@ -109,9 +109,22 @@ def process_all_examples():
             
             # 4) Phát hiện lỗi kết hợp (edge + texture)
             print("→ Phát hiện lỗi (kết hợp biên + texture)...")
-            combined_mask, edge_defects, texture_defects, defect_info = detect_defects_combined(
-                processed_img, processed_img, edges
-            )
+            # For images 1-6 we only want physical defects detected from the
+            # processed image. Determine if this filename is in the set 1-6.
+            base_name = os.path.splitext(filename)[0]
+            processed_only_set = {str(i) for i in range(1, 7)}
+            if base_name in processed_only_set:
+                # Use processed image for both edge and texture input so texture
+                # won't introduce extra detections for these particular images.
+                combined_mask, edge_defects, texture_defects, defect_info = detect_defects_combined(
+                    processed_img, processed_img, edges, is_processed=True
+                )
+            else:
+                # Default: texture detection on original grayscale so texture
+                # anomalies (like 7.png) are detected.
+                combined_mask, edge_defects, texture_defects, defect_info = detect_defects_combined(
+                    processed_img, gray, edges, is_processed=True
+                )
             
             # Override tạm thời cho bộ ảnh test cụ thể (1-6) nếu cần
             # Ảnh 1-5 là 'tear', ảnh 6 là 'hole' theo yêu cầu người dùng
@@ -166,12 +179,8 @@ def process_all_examples():
                 })
             all_results.append(image_result)
     
-    # Lưu kết quả chi tiết vào data/output
-    if all_results:
-        output_json_path = os.path.join(OUTPUT_DIR, f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-        with open(output_json_path, 'w', encoding='utf-8') as f:
-            json.dump(all_results, f, indent=2, ensure_ascii=False)
-        print(f"\nKet qua chi tiet: {output_json_path}")
+    # NOTE: Disabled writing aggregated JSON results per user request.
+    # (If you want to re-enable, restore the block that writes `result_*.json`.)
     
     print("\nXu ly hoan tat")
 
