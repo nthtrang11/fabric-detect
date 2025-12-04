@@ -36,12 +36,12 @@ def detect_defects_combined(image, gray_image, edges_image):
     for cnt in contours:
         if cv2.contourArea(cnt) < 50:  # Loại bỏ nhiễu nhỏ
             continue
-        
+
         area = cv2.contourArea(cnt)
         x, y, w, h = cv2.boundingRect(cnt)
-        
-        # Xác định loại lỗi
-        defect_type = classify_defect_type(gray_image, edge_defects, texture_defects, x, y, w, h)
+
+        # Xác định loại lỗi (truyền contour để tính đặc trưng hình học)
+        defect_type = classify_defect_type(gray_image, edge_defects, texture_defects, x, y, w, h, cnt)
         
         # Trích xuất texture features
         region = (y, x, h, w)
@@ -85,7 +85,7 @@ def detect_edge_defects(edges, gray_image):
     
     return edge_mask, contours
 
-def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h):
+def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h, contour):
     """
     Phân loại loại lỗi dựa trên characteristics:
     - 'hole': Lỗ thủng (phát hiện từ edge)
@@ -101,20 +101,57 @@ def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h):
     # Tính tỷ lệ edge và texture trong vùng
     edge_ratio = np.sum(region_edge > 0) / (w * h + 1e-10)
     texture_ratio = np.sum(region_texture > 0) / (w * h + 1e-10)
-    
-    # Phân loại dựa trên tỷ lệ
-    if edge_ratio > 0.6 and texture_ratio < 0.3:
-        # Chủ yếu là edge → lỗ thủng hoặc vết đứt
-        region_gray = gray_image[y:y+h, x:x+w]
-        circularity = compute_circularity(region_edge, w, h)
-        if circularity > 0.7:
-            return 'hole'  # Lỗ thủng
-        else:
-            return 'tear'  # Vết đứt
-    elif edge_ratio < 0.3 and texture_ratio > 0.6:
-        return 'uneven_weaving'  # Dệt không đều
-    else:
-        return 'combined'  # Kết hợp
+
+    # Quyết định dựa trên edge vs texture:
+    # - Nếu edge có ngưỡng đáng kể hoặc không quá nhỏ so với texture -> coi là edge-dominant
+    # - Nếu texture rất lớn so với edge và edge rất nhỏ -> uneven_weaving
+    # - Trường hợp mơ hồ: ưu tiên edge (giúp phát hiện scratches/tears)
+    region_gray = gray_image[y:y+h, x:x+w]
+    # Tính circularity trực tiếp từ contour
+    circularity = compute_circularity_from_contour(contour)
+    aspect_ratio = float(w) / (h + 1e-10)
+    area_cnt = cv2.contourArea(contour)
+    hull = cv2.convexHull(contour)
+    hull_area = cv2.contourArea(hull) if hull is not None else 0
+    solidity = area_cnt / (hull_area + 1e-10)
+    extent = area_cnt / (w * h + 1e-10)
+
+    # Nếu edge có mặt rõ rệt (ưu tiên edge dù texture cũng có)
+    # edge_dominant nếu edge đủ lớn hoặc chiếm tỉ lệ so với texture
+    edge_dominant = (edge_ratio >= max(0.10, 0.25 * texture_ratio))
+    if edge_dominant:
+        # Nếu vùng tròn, solidity cao và diện tích đủ lớn → hole
+        if circularity > 0.60 and solidity > 0.55 and 0.6 <= aspect_ratio <= 1.6 and area_cnt > 180:
+            return 'hole'
+        # Nếu vùng kéo dài hoặc méo → tear (scratch)
+        if aspect_ratio > 2.0 or aspect_ratio < 0.4 or circularity < 0.35 or extent < 0.25:
+            return 'tear'
+        # Các trường hợp khác: ưu tiên tear nếu shape không tròn
+        if circularity < 0.50 or solidity < 0.5:
+            return 'tear'
+        return 'hole'
+
+    # Nếu texture rõ rệt hơn -> uneven weaving
+    # Nếu texture thực sự lớn còn edge rất nhỏ -> uneven weaving
+    if texture_ratio > 0.60 and edge_ratio < 0.05:
+        return 'uneven_weaving'
+
+    # Fallback: nếu circularity lớn → hole, ngược lại coi là tear
+    if circularity > 0.60 and solidity > 0.5:
+        return 'hole'
+    return 'tear'
+
+
+def compute_circularity_from_contour(cnt):
+    """
+    Tính circularity từ contour: 4π * Area / Perimeter^2
+    """
+    area = cv2.contourArea(cnt)
+    perimeter = cv2.arcLength(cnt, True)
+    if perimeter < 1e-10:
+        return 0
+    circularity = 4 * np.pi * (area / (perimeter ** 2))
+    return min(max(circularity, 0.0), 1.0)
 
 def compute_circularity(mask, width, height):
     """
