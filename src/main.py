@@ -41,8 +41,6 @@
 
 
 import os
-import csv
-from datetime import datetime
 from config import EXAMPLE_DIR, OUTPUT_DIR
 from io_utils import load_image, save_image
 from preprocess import preprocess_image
@@ -59,10 +57,7 @@ def process_all_examples():
     # Đảm bảo thư mục output tồn tại
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Tạo file CSV để lưu báo cáo
-    report_path = os.path.join(OUTPUT_DIR, f'report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
-    
-    all_defects = []
+    # Không tạo file báo cáo nữa — sẽ lưu ảnh gốc có chú thích lỗi
     
     for filename in os.listdir(EXAMPLE_DIR):
         if filename.lower().endswith((".jpg", ".png")):
@@ -108,59 +103,28 @@ def process_all_examples():
             
             if len(defect_info) == 0:
                 print(f"ℹ️  Không phát hiện lỗi trong ảnh {filename}")
-                result_img = gray.copy()
+                # Lưu ảnh gốc khi không có lỗi
+                result_img = img.copy()
             else:
                 print(f"✓ Phát hiện {len(defect_info)} lỗi")
                 
                 # Vẽ kết quả
-                result_img = visualize_defects_analysis(gray, combined_mask, edge_defects, texture_defects, defect_info)
+                result_img = visualize_defects_analysis(img.copy(), combined_mask, edge_defects, texture_defects, defect_info)
                 
-                # In thông tin chi tiết
+                # In thông tin chi tiết (để debug/console)
                 for i, defect in enumerate(defect_info, 1):
                     print(f"  Lỗi {i}:")
                     print(f"    - Loại: {defect['type']}")
                     print(f"    - Diện tích: {defect['area']:.1f} px²")
                     print(f"    - Mức độ nghiêm trọng: {defect['severity']:.1f}%")
                     print(f"    - Texture entropy: {defect['texture_features']['entropy']:.3f}")
-                    
-                    # Lưu vào danh sách
-                    all_defects.append({
-                        'filename': filename,
-                        'defect_id': i,
-                        'type': defect['type'],
-                        'area': f"{defect['area']:.1f}",
-                        'width': defect['width'],
-                        'height': defect['height'],
-                        'severity': f"{defect['severity']:.1f}",
-                        'entropy': f"{defect['texture_features']['entropy']:.3f}",
-                        'contrast': f"{defect['texture_features']['contrast']:.3f}",
-                        'position_x': defect['x'],
-                        'position_y': defect['y']
-                    })
             
-            # 5) Lưu ảnh kết quả
+            # 5) Lưu ảnh kết quả — sử dụng ảnh gốc kèm chú thích
             output_path = os.path.join(OUTPUT_DIR, f"detected_{filename}")
             save_image(output_path, result_img)
             print(f"✓ Lưu kết quả: {output_path}")
     
-    # 6) Lưu báo cáo CSV
-    if all_defects:
-        print(f"\n📊 Lưu báo cáo: {report_path}")
-        with open(report_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=all_defects[0].keys())
-            writer.writeheader()
-            writer.writerows(all_defects)
-        
-        # In tóm tắt
-        print(f"\n📈 TÓMLƯỢC:")
-        print(f"  - Tổng số ảnh: {len(set(d['filename'] for d in all_defects))}")
-        print(f"  - Tổng số lỗi: {len(all_defects)}")
-        print(f"  - Phân loại lỗi:")
-        for defect_type in set(d['type'] for d in all_defects):
-            count = sum(1 for d in all_defects if d['type'] == defect_type)
-            print(f"    • {defect_type}: {count}")
-    else:
-        print("\n✓ Xử lý hoàn tất - không phát hiện lỗi")
+    print("\n✓ Xử lý hoàn tất")
 
 if __name__ == "__main__":
     process_all_examples()

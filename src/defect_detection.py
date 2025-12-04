@@ -193,14 +193,9 @@ def visualize_defects_analysis(image, combined_mask, edge_defects, texture_defec
         # Vẽ bounding box
         cv2.rectangle(vis_img, (x, y), (x + w, y + h), color, 2)
         
-        # Vẽ text thông tin
-        text = f"{defect_type}: Sev {severity:.0f}%"
+        # Vẽ text: tên lỗi + diện tích (px)
+        text = f"{defect_type} | {defect['area']:.1f}px"
         cv2.putText(vis_img, text, (x, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-        
-        # Vẽ area
-        text_area = f"A:{defect['area']:.0f}"
-        cv2.putText(vis_img, text_area, (x, y + h + 15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
     
     return vis_img
