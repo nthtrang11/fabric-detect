@@ -14,3 +14,17 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 BLUR_KERNEL = (5, 5)
 CANNY_THRESHOLD_1 = 80
 CANNY_THRESHOLD_2 = 150
+
+# Texture filtering thresholds
+# Minimum area (px) for an uneven_weaving region to be reported
+MIN_TEXTURE_AREA = 700
+# Minimum texture entropy for an uneven_weaving region to be reported
+MIN_TEXTURE_ENTROPY = 1.0
+
+# List of example base filenames (without extension) for which texture
+# detection should be skipped/ignored (treat as processed-only for texture).
+# Example: to skip texture for image `22.jpg` set SKIP_TEXTURE_IMAGES = {'22'}
+SKIP_TEXTURE_IMAGES = set()
+
+# Minimum area (px) for a hole to be reported
+MIN_HOLE_AREA = 300

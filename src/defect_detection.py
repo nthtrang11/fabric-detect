@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from texture_analysis import detect_texture_anomalies, extract_texture_descriptors
+from config import MIN_TEXTURE_AREA, MIN_TEXTURE_ENTROPY, MIN_HOLE_AREA
 
 def detect_defects_combined(image, gray_image, edges_image, is_processed=True, physical_overlap_thresh=0.05):
     """
@@ -20,6 +21,18 @@ def detect_defects_combined(image, gray_image, edges_image, is_processed=True, p
     
     # Phương pháp 2: Phát hiện lỗi từ texture
     texture_defects, texture_map = detect_texture_anomalies(gray_image, window_size=32, threshold_std=1.5)
+
+    # Loại bỏ các vùng texture rất nhỏ ngay từ mask (tránh false positives nhỏ)
+    try:
+        t_contours, _ = cv2.findContours(texture_defects.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filtered_texture = np.zeros_like(texture_defects)
+        for tc in t_contours:
+            if cv2.contourArea(tc) >= MIN_TEXTURE_AREA:
+                cv2.drawContours(filtered_texture, [tc], 0, 255, -1)
+        texture_defects = filtered_texture
+    except Exception:
+        # On error keep original
+        pass
     
     # Kết hợp hai phương pháp
     combined_mask = cv2.bitwise_or(edge_defects, texture_defects)
@@ -49,9 +62,19 @@ def detect_defects_combined(image, gray_image, edges_image, is_processed=True, p
         
         # Tính severity score (0-100)
         severity = calculate_defect_severity(area, w, h, texture_features, defect_type)
+
+        # Nếu là lỗi texture (uneven_weaving) thì bỏ qua nếu quá nhỏ hoặc
+        # entropy quá thấp (loại nhiễu nhỏ)
+        if defect_type == 'uneven_weaving':
+            if area < MIN_TEXTURE_AREA or texture_features.get('entropy', 0) < MIN_TEXTURE_ENTROPY:
+                continue
         
         # If defect classified as physical (hole/tear) we require that the
         # region has sufficient overlap with the processed mask `image`.
+        # Skip small holes globally
+        if defect_type == 'hole' and area < MIN_HOLE_AREA:
+            continue
+
         if defect_type in ('hole', 'tear'):
             # `image` is expected to be the processed binary mask (0/255)
             try:
@@ -149,16 +172,27 @@ def classify_defect_type(gray_image, edge_mask, texture_mask, x, y, w, h, contou
         # Các trường hợp khác: ưu tiên tear nếu shape không tròn
         if circularity < 0.50 or solidity < 0.5:
             return 'tear'
-        return 'hole'
+        # Nếu không khớp rõ ràng vào điều kiện 'hole', trả về 'tear' thay vì
+        # mặc định gán 'hole' (tránh misclassify trên các vùng hơi lệch).
+        return 'tear'
 
     # Nếu texture rõ rệt hơn -> uneven weaving
     # Nếu texture thực sự lớn còn edge rất nhỏ -> uneven weaving
     if texture_ratio > 0.60 and edge_ratio < 0.05:
         return 'uneven_weaving'
 
-    # Fallback: nếu circularity lớn → hole, ngược lại coi là tear
-    if circularity > 0.60 and solidity > 0.5:
-        return 'hole'
+    # If shape is compact/solid and area is large enough, prefer 'hole'
+    # This handles cases where texture may also be present but the defect
+    # is a physical puncture/hole with a filled contour (high solidity/extent).
+    try:
+        from config import MIN_HOLE_AREA as MIN_HOLE
+        if circularity > 0.60 and solidity > 0.85 and extent > 0.5 and area_cnt > MIN_HOLE:
+            return 'hole'
+    except Exception:
+        # if config import fails or values missing, skip this rule
+        pass
+
+    # Fallback: khi không rõ ràng, ưu tiên trả 'tear' (an toàn hơn)
     return 'tear'
 
 

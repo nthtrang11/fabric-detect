@@ -43,7 +43,7 @@
 import os
 import json
 from datetime import datetime
-from config import EXAMPLE_DIR, OUTPUT_DIR, PROCESSED_DIR
+from config import EXAMPLE_DIR, OUTPUT_DIR, PROCESSED_DIR, SKIP_TEXTURE_IMAGES
 from io_utils import load_image, save_image
 from preprocess import preprocess_image
 from edge_detection import detect_edges
@@ -113,7 +113,10 @@ def process_all_examples():
             # processed image. Determine if this filename is in the set 1-6.
             base_name = os.path.splitext(filename)[0]
             processed_only_set = {str(i) for i in range(1, 7)}
-            if base_name in processed_only_set:
+            # If image is in processed_only_set or explicitly listed to skip
+            # texture detection via config.SKIP_TEXTURE_IMAGES, use processed
+            # image for both edge and texture inputs.
+            if base_name in processed_only_set or base_name in SKIP_TEXTURE_IMAGES:
                 # Use processed image for both edge and texture input so texture
                 # won't introduce extra detections for these particular images.
                 combined_mask, edge_defects, texture_defects, defect_info = detect_defects_combined(
@@ -128,14 +131,14 @@ def process_all_examples():
             
             # Override tạm thời cho bộ ảnh test cụ thể (1-6) nếu cần
             # Ảnh 1-5 là 'tear', ảnh 6 là 'hole' theo yêu cầu người dùng
-            overrides = {
-                '1.jpg': 'tear', '2.jpg': 'tear', '3.jpg': 'tear', '4.jpg': 'tear', '5.jpg': 'tear',
-                '6.jpg': 'hole'
-            }
-            if filename in overrides and len(defect_info) > 0:
-                forced = overrides[filename]
-                for d in defect_info:
-                    d['type'] = forced
+            # overrides = {
+            #     '1.jpg': 'tear', '2.jpg': 'tear', '3.jpg': 'tear', '4.jpg': 'tear', '5.jpg': 'tear',
+            #     '6.jpg': 'hole'
+            # }
+            # if filename in overrides and len(defect_info) > 0:
+            #     forced = overrides[filename]
+            #     for d in defect_info:
+            #         d['type'] = forced
 
             if len(defect_info) == 0:
                 print(f"ℹ️  Không phát hiện lỗi trong ảnh {filename}")
